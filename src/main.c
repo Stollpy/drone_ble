@@ -8,6 +8,7 @@
 #include "esp_gatt_common_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string.h>
 
 #define DEVICE_NAME "stollpy_drone"
 #define GATTS_TAG "BLE_SERVER"
@@ -25,6 +26,8 @@
 
 #define adv_config_flag (1 << 0)
 #define scan_rsp_config_flag (1 << 1)
+
+void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
 static uint8_t adv_config_done = 0;
 static uint8_t motor_char_base_state = MOTOR_STATE_STOP;
@@ -98,6 +101,13 @@ static esp_ble_adv_data_t scan_rsp_data = {
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT)
 };
 
+static struct gatts_profile_inst gl_profile_tab[APP_NUM] = {
+    [APP_MOTOR_ID] = {
+        .gatts_cb = gatts_app_motor_event_handler,
+        .gatts_if = ESP_GATT_IF_NONE,
+    }
+};
+
 
 void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) 
 {
@@ -131,28 +141,77 @@ void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
 
             int motor_property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE; // | ESP_GATT_CHAR_PROP_BIT_NOTIFY
             
-            esp_err_t add_char_ret = esp_bel_gatts_add_char(
+            esp_err_t add_char_ret = esp_ble_gatts_add_char(
                 gl_profile_tab[APP_MOTOR_ID].service_handle,
                 &gl_profile_tab[APP_MOTOR_ID].char_uuid,
                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
                 motor_property,
-                &motor_char_val
+                &motor_char_val,
+                NULL
             );
 
             if (add_char_ret) {
                 ESP_LOGE(GATTS_TAG, "add char failed, error code = %x", add_char_ret);
             }
+            break;
+        case ESP_GATTS_ADD_CHAR_EVT: {
+            uint16_t length = 0;
+            const uint8_t *prf_char;
+
+            ESP_LOGI(GATTS_TAG, "ADD_CHAR_EVT, status %d, attr_handle %d, servive_handle %d", param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
+            gl_profile_tab[APP_MOTOR_ID].char_handle = param->add_char.attr_handle;
+            gl_profile_tab[APP_MOTOR_ID].service_handle = param->add_char.service_handle;
+            gl_profile_tab[APP_MOTOR_ID].char_uuid.uuid.uuid16 = param->add_char.char_uuid.uuid.uuid16;
+            
+            esp_err_t get_attr_ret = esp_ble_gatts_get_attr_value(param->add_char.attr_handle, &length, &prf_char);
+            if (get_attr_ret == ESP_FAIL) {
+                ESP_LOGE(GATTS_TAG, "ILLEGAL HANDLE");
+            }
+
+            ESP_LOGI(GATTS_TAG, "The gatts demo char length = %x", length);
+
+            esp_err_t add_descr_ret = esp_ble_gatts_add_char_descr(
+                gl_profile_tab[APP_MOTOR_ID].service_handle,
+                &gl_profile_tab[APP_MOTOR_ID].descr_uuid,
+                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                NULL, NULL
+            );
+
+            if (add_descr_ret) {
+                ESP_LOGE(GATTS_TAG, "Add char descr failed, error code = %x", add_descr_ret);
+            }
+            break;
+        }
+        case ESP_GATTS_ADD_CHAR_DESCR_EVT:
+            ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d", param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
+        case ESP_GATTS_CONNECT_EVT: {
+            esp_ble_conn_update_params_t conn_params = {0};
+            memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+            
+            conn_params.latency = 0;
+            conn_params.max_int = 0x30;
+            conn_params.min_int = 0x10;
+            conn_params.timeout = 400;
+
+            ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x",
+                param->connect.conn_id,
+                param->connect.remote_bda[0],
+                param->connect.remote_bda[1],
+                param->connect.remote_bda[2],
+                param->connect.remote_bda[3],
+                param->connect.remote_bda[4],
+                param->connect.remote_bda[5]
+            );
+
+            gl_profile_tab[APP_MOTOR_ID].conn_id = param->connect.conn_id;
+
+            esp_ble_gap_update_conn_params(&conn_params);
+            break;
+        }
         default:
             break;
     }
 }
-
-static struct gatts_profile_inst gl_profile_tab[APP_NUM] = {
-    [APP_MOTOR_ID] = {
-        .gatts_cb = gatts_app_motor_event_handler,
-        .gatts_if = ESP_GATT_IF_NONE,
-    }
-};
 
 
 void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) 
@@ -200,6 +259,12 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
             } else {
                 ESP_LOGE(GATTS_TAG, "Advertising started with successfully");
             }
+        case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
+            ESP_LOGI(GATTS_TAG, "update connection params status = %d, conn_int = %d, latency = %d, timeout = %d", 
+                param->update_conn_params.status, 
+                param->update_conn_params.conn_int, 
+                param->update_conn_params.latency, 
+                param->update_conn_params.timeout);
         default:
             break;
     }
