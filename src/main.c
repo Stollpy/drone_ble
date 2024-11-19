@@ -1,4 +1,4 @@
-#include <stdio.h>
+#include "stdio.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
@@ -8,21 +8,24 @@
 #include "esp_gatt_common_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <string.h>
+#include "string.h"
+#include "inttypes.h"
+#include "driver/gpio.h"
 
 #define DEVICE_NAME "stollpy_drone"
 #define GATTS_TAG "BLE_SERVER"
 #define APP_NUM 1
 
 #define APP_MOTOR_ID 0
-#define APP_MOTOR_CHAR_VAL_LEN_MAX 0x40
+#define APP_MOTOR_CHAR_VAL_LEN_MAX 0x01
 #define MOTOR_SERVICE_UUID 0x00FF
 #define MOTOR_CHARACTERISTIC_UUID 0xFF01
 #define MOTOR_DESCR_UUID 0x3333
-#define MOTOR_HANDLE 4
-#define MOTOR_STATE_START 1
-#define MOTOR_STATE_STOP 0
+#define MOTOR_HANDLE 0x04
+#define MOTOR_STATE_START 0x01
+#define MOTOR_STATE_STOP 0x00
 
+#define MOTOR_1_PIN GPIO_NUM_4
 
 #define adv_config_flag (1 << 0)
 #define scan_rsp_config_flag (1 << 1)
@@ -30,13 +33,12 @@
 void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
 static uint8_t adv_config_done = 0;
-static uint8_t motor_char_base_state = MOTOR_STATE_STOP;
-static esp_gatt_char_prop_t motor_property = 0;
 
+static uint8_t motor_state = MOTOR_STATE_STOP;
 static esp_attr_value_t motor_char_val = {
     .attr_max_len = APP_MOTOR_CHAR_VAL_LEN_MAX,
-    .attr_len = sizeof(MOTOR_STATE_STOP),
-    .attr_value = MOTOR_STATE_STOP
+    .attr_len = sizeof(motor_state),
+    .attr_value = &motor_state
 };
 
 // Prefix 128 bits: 0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00
@@ -85,21 +87,21 @@ static esp_ble_adv_params_t adv_params = {
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY
 };
 
-static esp_ble_adv_data_t scan_rsp_data = {
-    .set_scan_rsp = true,
-    .include_name = true,
-    .include_txpower = true,
-    // .min_interval = 0x0006,
-    // .max_interval = 0x0010,
-    .appearance = 0x00,
-    .manufacturer_len = 0,
-    .p_manufacturer_data = NULL,
-    .service_data_len = 0,
-    .p_service_data = NULL,
-    .service_uuid_len = sizeof(adv_service_uuid128),
-    .p_service_uuid = adv_service_uuid128,
-    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT)
-};
+// static esp_ble_adv_data_t scan_rsp_data = {
+//     .set_scan_rsp = true,
+//     .include_name = true,
+//     .include_txpower = true,
+//     // .min_interval = 0x0006,
+//     // .max_interval = 0x0010,
+//     .appearance = 0x00,
+//     .manufacturer_len = 0,
+//     .p_manufacturer_data = NULL,
+//     .service_data_len = 0,
+//     .p_service_data = NULL,
+//     .service_uuid_len = sizeof(adv_service_uuid128),
+//     .p_service_uuid = adv_service_uuid128,
+//     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT)
+// };
 
 static struct gatts_profile_inst gl_profile_tab[APP_NUM] = {
     [APP_MOTOR_ID] = {
@@ -138,17 +140,16 @@ void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
             gl_profile_tab[APP_MOTOR_ID].char_uuid.uuid.uuid16 = MOTOR_CHARACTERISTIC_UUID;
 
             esp_ble_gatts_start_service(gl_profile_tab[APP_MOTOR_ID].service_handle);
-
-            int motor_property = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE; // | ESP_GATT_CHAR_PROP_BIT_NOTIFY
+           
+            ESP_LOGI(GATTS_TAG, "CREATE SERVICE EVT: service started");
             
             esp_err_t add_char_ret = esp_ble_gatts_add_char(
                 gl_profile_tab[APP_MOTOR_ID].service_handle,
                 &gl_profile_tab[APP_MOTOR_ID].char_uuid,
                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                motor_property,
+                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE, // | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
                 &motor_char_val,
-                NULL
-            );
+                NULL);
 
             if (add_char_ret) {
                 ESP_LOGE(GATTS_TAG, "add char failed, error code = %x", add_char_ret);
@@ -183,7 +184,9 @@ void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
             break;
         }
         case ESP_GATTS_ADD_CHAR_DESCR_EVT:
+            gl_profile_tab[APP_MOTOR_ID].descr_handle = param->add_char_descr.attr_handle;
             ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d", param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
+            break;
         case ESP_GATTS_CONNECT_EVT: {
             esp_ble_conn_update_params_t conn_params = {0};
             memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
@@ -206,6 +209,53 @@ void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
             gl_profile_tab[APP_MOTOR_ID].conn_id = param->connect.conn_id;
 
             esp_ble_gap_update_conn_params(&conn_params);
+            break;
+        }
+        case ESP_GATTS_READ_EVT: {
+            ESP_LOGI(GATTS_TAG, "GATT_READ_EVT, conn_id %" PRIu16 ", trans_id %" PRIu32 ", handle %" PRIu16, param->read.conn_id, param->read.trans_id, param->read.handle);
+
+            esp_gatt_rsp_t rsp;
+            memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+            
+            rsp.attr_value.handle = param->read.handle;
+            rsp.attr_value.len = APP_MOTOR_CHAR_VAL_LEN_MAX;
+            rsp.attr_value.value[0] = motor_state;
+            
+            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
+            break;
+        }
+        case ESP_GATTS_WRITE_EVT: {
+            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %" PRIu16 ", trans_id %" PRIu32 ", handle %" PRIu16, param->write.conn_id, param->write.trans_id, param->write.handle);
+
+            if (!param->write.is_prep) {
+                ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
+
+                if (param->write.handle == gl_profile_tab[APP_MOTOR_ID].char_handle && param->write.len == 1) {
+                    motor_state = param->write.value[0];
+
+                    if (motor_state == 0) {
+                        ESP_LOGI(GATTS_TAG, "Received value: 0 - Motor stopped");
+                    } else if (motor_state == 1) {
+                        ESP_LOGI(GATTS_TAG, "Received value: 1 - Motor started");
+                    } else {
+                        ESP_LOGW(GATTS_TAG, "Invalid value received: %d", motor_state);
+                    }
+
+                    gpio_set_level(MOTOR_1_PIN, motor_state);
+                    
+                    esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
+                } else {
+                    ESP_LOGW(GATTS_TAG, "Write event not targeting the correct handle or invalid length");
+                    esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_INVALID_HANDLE, NULL);
+
+                }
+            }
+            break;
+        }
+        case ESP_GATTS_DISCONNECT_EVT: {
+            ESP_LOGI(GATTS_TAG, "Disconnected, remote "ESP_BD_ADDR_STR", reason 0x%02x",
+            ESP_BD_ADDR_HEX(param->disconnect.remote_bda), param->disconnect.reason);
+            esp_ble_gap_start_advertising(&adv_params);
             break;
         }
         default:
@@ -253,18 +303,21 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
             if (0 == adv_config_done) {
                 esp_ble_gap_start_advertising(&adv_params);
             }
+            break;
         case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
             if (ESP_BT_STATUS_SUCCESS != param->adv_start_cmpl.status) {
                 ESP_LOGE(GATTS_TAG, "Advertising start failed");
             } else {
                 ESP_LOGE(GATTS_TAG, "Advertising started with successfully");
             }
+            break;
         case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
             ESP_LOGI(GATTS_TAG, "update connection params status = %d, conn_int = %d, latency = %d, timeout = %d", 
                 param->update_conn_params.status, 
                 param->update_conn_params.conn_int, 
                 param->update_conn_params.latency, 
                 param->update_conn_params.timeout);
+            break;
         default:
             break;
     }
@@ -275,6 +328,8 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
 void app_main() 
 {
     printf("START ...\n");
+
+    gpio_set_direction(MOTOR_1_PIN, GPIO_MODE_OUTPUT);
 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -334,15 +389,3 @@ void app_main()
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
-
-    // printf("ENABLE PIN %d ...\n", GPIO_NUM_4);
-    
-    // gpio_set_direction(GPIO_NUM_4, GPIO_MODE_OUTPUT);
-    
-    // printf("%d \n", gpio_set_level(GPIO_NUM_4, 1));
-
-    // vTaskDelay(3000 / portTICK_PERIOD_MS);
-    
-    // printf("DISABLE PIN %d ...\n", GPIO_NUM_4);
-
-    // printf("%d \n", gpio_set_level(GPIO_NUM_4, 0));
