@@ -211,7 +211,17 @@ void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
 
                     // TODO: Implement motor control by Bus
                     // gpio_set_level(MOTOR_1_PIN_1, motor_state);
-                    
+
+                    event_t event = {
+                        .type = EVENT_BLE_MOTORS_COMMAND,
+                        .data = {
+                            .ble_motors_command = {
+                                .type = motor_state
+                            }
+                        }
+                    };
+
+                    event_bus_publish(&event);
                     esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
                 } else {
                     ESP_LOGW(GATTS_TAG, "Write event not targeting the correct handle or invalid length");

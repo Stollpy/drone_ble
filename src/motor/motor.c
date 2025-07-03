@@ -1,5 +1,4 @@
 #include "motor/motor.h"
-#include "config.h"
 
 ledc_timer_config_t ledc_timer_motor_1 = {
     .speed_mode       = LEDC_LOW_SPEED_MODE,
@@ -38,6 +37,18 @@ ledc_channel_config_t ledc_channel_motor_2 = {
     .hpoint         = 0
 };
 
+void motors_command_handler(event_t *event) {
+    if (event->type == EVENT_BLE_MOTORS_COMMAND) {
+        if (event->data.ble_motors_command.type == MOTOR_CMD_START) {
+            gpio_set_level(MOTOR_1_PIN_1, 1);
+            gpio_set_level(MOTOR_2_PIN_1, 1);
+        } else if (event->data.ble_motors_command.type == MOTOR_CMD_STOP) {
+            gpio_set_level(MOTOR_1_PIN_1, 0);
+            gpio_set_level(MOTOR_2_PIN_1, 0);
+        }
+    }
+}
+
 void motors_init() {
     gpio_set_direction(MOTOR_1_PIN_1, GPIO_MODE_OUTPUT);
     gpio_set_direction(MOTOR_1_PIN_2, GPIO_MODE_OUTPUT);
@@ -47,10 +58,10 @@ void motors_init() {
     gpio_set_direction(MOTOR_2_PIN_2, GPIO_MODE_OUTPUT);
     gpio_set_direction(MOTOR_2_ENABLE_PIN, GPIO_MODE_OUTPUT);
 
-    gpio_set_level(MOTOR_1_PIN_1, 1);  // IN1 = 1
+    gpio_set_level(MOTOR_1_PIN_1, 0);  // IN1 = 1
     gpio_set_level(MOTOR_1_PIN_2, 0);  // IN2 = 0
 
-    gpio_set_level(MOTOR_2_PIN_1, 1);  // IN1 = 1
+    gpio_set_level(MOTOR_2_PIN_1, 0);  // IN1 = 1
     gpio_set_level(MOTOR_2_PIN_2, 0);  // IN2 = 0
 
     ledc_timer_config(&ledc_timer_motor_1);
@@ -64,4 +75,6 @@ void motors_init() {
 
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 256); // Ajout pour moteur 2
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1); // Ajout pour moteur 2
+
+    event_bus_subscribe(EVENT_BLE_MOTORS_COMMAND, motors_command_handler);
 }
