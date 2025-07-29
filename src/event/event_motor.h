@@ -1,3 +1,4 @@
+// event_motor.h
 #ifndef EVENT_MOTOR_H
 #define EVENT_MOTOR_H
 
@@ -5,8 +6,8 @@
 
 typedef struct {
     uint8_t motor_id;
-    uint8_t direction;
     uint8_t speed;
+    uint8_t direction;
 } event_motor_data_t;
 
-#endif
+#endif 

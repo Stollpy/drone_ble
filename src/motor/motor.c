@@ -49,6 +49,45 @@ void motors_command_handler(event_t *event) {
     }
 }
 
+static int normalize_joystick_value(int raw) {
+    int delta = raw - JOYSTICK_ADC_CENTER;
+    if (abs(delta) < JOYSTICK_DEADZONE) return 0;
+    return delta;
+}
+
+static void update_motor_speed_from_joystick() {
+    int y = normalize_joystick_value(joystick_state.y);
+    int x = normalize_joystick_value(joystick_state.x);
+
+    int base_speed = y;
+    int diff = x;
+
+    int motor1_speed = base_speed - diff;
+    int motor2_speed = base_speed + diff;
+
+    motor1_speed = MIN(MAX(motor1_speed, 0), 255);
+    motor2_speed = MIN(MAX(motor2_speed, 0), 255);
+
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, motor1_speed);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, motor2_speed);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
+}
+
+void motors_direction_handler(event_t *event) {
+    if (event->type != EVENT_BLE_JOYSTICK_DIRECTION) return;
+
+    if (event->data.ble_joystick_direction.axe == 'x') {
+        joystick_state.x = event->data.ble_joystick_direction.position;
+    } else if (event->data.ble_joystick_direction.axe == 'y') {
+        joystick_state.y = event->data.ble_joystick_direction.position;
+    }
+
+    update_motor_speed_from_joystick();
+}
+
+
 void motors_init() {
     gpio_set_direction(MOTOR_1_PIN_1, GPIO_MODE_OUTPUT);
     gpio_set_direction(MOTOR_1_PIN_2, GPIO_MODE_OUTPUT);
@@ -66,15 +105,14 @@ void motors_init() {
 
     ledc_timer_config(&ledc_timer_motor_1);
     ledc_channel_config(&ledc_channel_motor_1);
-
-    ledc_timer_config(&ledc_timer_motor_2); // Ajout pour moteur 2
-    ledc_channel_config(&ledc_channel_motor_2); // Ajout pour moteur 2
-
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 256);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 
+    ledc_timer_config(&ledc_timer_motor_2); // Ajout pour moteur 2
+    ledc_channel_config(&ledc_channel_motor_2); // Ajout pour moteur 2
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 256); // Ajout pour moteur 2
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1); // Ajout pour moteur 2
 
     event_bus_subscribe(EVENT_BLE_MOTORS_COMMAND, motors_command_handler);
+    event_bus_subscribe(EVENT_BLE_JOYSTICK_DIRECTION, motors_direction_handler);
 }
