@@ -9,6 +9,20 @@ static esp_attr_value_t motor_char_val = {
     .attr_value = &motor_state
 };
 
+// Variables pour le joystick
+static int32_t joystick_x = 0;
+static int32_t joystick_y = 0;
+static esp_attr_value_t joystick_x_char_val = {
+    .attr_max_len = sizeof(int32_t),
+    .attr_len = sizeof(int32_t),
+    .attr_value = (uint8_t*)&joystick_x
+};
+static esp_attr_value_t joystick_y_char_val = {
+    .attr_max_len = sizeof(int32_t),
+    .attr_len = sizeof(int32_t),
+    .attr_value = (uint8_t*)&joystick_y
+};
+
 // Prefix 128 bits: 0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00
 static uint8_t adv_service_uuid128[16] = {
     0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00
@@ -26,6 +40,25 @@ struct gatts_profile_inst
     esp_bt_uuid_t char_uuid;
     esp_gatt_perm_t perm;
     esp_gatt_char_prop_t property;
+    uint16_t descr_handle;
+    esp_bt_uuid_t descr_uuid;
+};
+
+// Structure étendue pour le joystick avec 2 caractéristiques
+struct gatts_joystick_profile_inst
+{
+    esp_gatts_cb_t gatts_cb;
+    uint16_t gatts_if;
+    uint16_t app_id;
+    uint16_t conn_id;
+    uint16_t service_handle;
+    esp_gatt_srvc_id_t service_id;
+    // Caractéristique X
+    uint16_t char_x_handle;
+    esp_bt_uuid_t char_x_uuid;
+    // Caractéristique Y
+    uint16_t char_y_handle;
+    esp_bt_uuid_t char_y_uuid;
     uint16_t descr_handle;
     esp_bt_uuid_t descr_uuid;
 };
@@ -75,8 +108,15 @@ static struct gatts_profile_inst gl_profile_tab[APP_NUM] = {
     [APP_MOTOR_ID] = {
         .gatts_cb = gatts_app_motor_event_handler,
         .gatts_if = ESP_GATT_IF_NONE,
+    },
+    [APP_JOYSTICK_ID] = {
+        .gatts_cb = gatts_app_joystick_event_handler,
+        .gatts_if = ESP_GATT_IF_NONE,
     }
 };
+
+// Profil spécifique pour le joystick
+static struct gatts_joystick_profile_inst gl_joystick_profile;
 
 
 void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
@@ -231,10 +271,105 @@ void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gat
             }
             break;
         }
-        case ESP_GATTS_DISCONNECT_EVT: {
-            ESP_LOGI(GATTS_TAG, "Disconnected, remote "ESP_BD_ADDR_STR", reason 0x%02x",
-            ESP_BD_ADDR_HEX(param->disconnect.remote_bda), param->disconnect.reason);
-            esp_ble_gap_start_advertising(&adv_params);
+        default:
+            break;
+    }
+}
+
+void gatts_app_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+{
+    switch (event)
+    {
+        case ESP_GATTS_REG_EVT:
+            ESP_LOGI(GATTS_TAG, "JOYSTICK REGISTER_APP_EVT: status %d, app_id %d", param->reg.status, param->reg.app_id);
+            
+            gl_joystick_profile.service_id.is_primary = true;
+            gl_joystick_profile.service_id.id.uuid.len = ESP_UUID_LEN_16;
+            gl_joystick_profile.service_id.id.uuid.uuid.uuid16 = JOYSTICK_SERVICE_UUID;
+            
+            esp_ble_gatts_create_service(gatts_if, &gl_joystick_profile.service_id, JOYSTICK_HANDLE);
+            break;
+            
+        case ESP_GATTS_CREATE_EVT:
+            ESP_LOGI(GATTS_TAG, "JOYSTICK CREATE SERVICE EVT: status %d, service handle: %d", param->create.status, param->create.service_handle);
+            
+            gl_joystick_profile.service_handle = param->create.service_handle;
+            
+            // Configuration de la caractéristique X
+            gl_joystick_profile.char_x_uuid.len = ESP_UUID_LEN_16;
+            gl_joystick_profile.char_x_uuid.uuid.uuid16 = JOYSTICK_X_CHARACTERISTIC_UUID;
+
+            esp_ble_gatts_start_service(gl_joystick_profile.service_handle);
+            
+            // Ajouter la caractéristique X
+            esp_err_t add_char_x_ret = esp_ble_gatts_add_char(
+                gl_joystick_profile.service_handle,
+                &gl_joystick_profile.char_x_uuid,
+                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                &joystick_x_char_val,
+                NULL);
+
+            if (add_char_x_ret) {
+                ESP_LOGE(GATTS_TAG, "add char X failed, error code = %x", add_char_x_ret);
+            }
+            break;
+            
+        case ESP_GATTS_ADD_CHAR_EVT:
+            ESP_LOGI(GATTS_TAG, "JOYSTICK ADD_CHAR_EVT, status %d, attr_handle %d, service_handle %d", 
+                param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
+            
+            // Identifier quelle caractéristique a été ajoutée
+            if (param->add_char.char_uuid.uuid.uuid16 == JOYSTICK_X_CHARACTERISTIC_UUID) {
+                gl_joystick_profile.char_x_handle = param->add_char.attr_handle;
+                ESP_LOGI(GATTS_TAG, "Caractéristique X ajoutée, handle: %d", gl_joystick_profile.char_x_handle);
+                
+                // Ajouter maintenant la caractéristique Y
+                gl_joystick_profile.char_y_uuid.len = ESP_UUID_LEN_16;
+                gl_joystick_profile.char_y_uuid.uuid.uuid16 = JOYSTICK_Y_CHARACTERISTIC_UUID;
+                
+                esp_err_t add_char_y_ret = esp_ble_gatts_add_char(
+                    gl_joystick_profile.service_handle,
+                    &gl_joystick_profile.char_y_uuid,
+                    ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                    ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                    &joystick_y_char_val,
+                    NULL);
+
+                if (add_char_y_ret) {
+                    ESP_LOGE(GATTS_TAG, "add char Y failed, error code = %x", add_char_y_ret);
+                }
+            } else if (param->add_char.char_uuid.uuid.uuid16 == JOYSTICK_Y_CHARACTERISTIC_UUID) {
+                gl_joystick_profile.char_y_handle = param->add_char.attr_handle;
+                ESP_LOGI(GATTS_TAG, "Caractéristique Y ajoutée, handle: %d", gl_joystick_profile.char_y_handle);
+            }
+            break;
+            
+        case ESP_GATTS_CONNECT_EVT:
+            ESP_LOGI(GATTS_TAG, "JOYSTICK ESP_GATTS_CONNECT_EVT, conn_id %d", param->connect.conn_id);
+            gl_joystick_profile.conn_id = param->connect.conn_id;
+            break;
+            
+        case ESP_GATTS_READ_EVT: {
+            ESP_LOGI(GATTS_TAG, "JOYSTICK GATT_READ_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d", 
+                param->read.conn_id, param->read.trans_id, param->read.handle);
+
+            esp_gatt_rsp_t rsp;
+            memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+            
+            rsp.attr_value.handle = param->read.handle;
+            
+            if (param->read.handle == gl_joystick_profile.char_x_handle) {
+                rsp.attr_value.len = sizeof(int32_t);
+                memcpy(rsp.attr_value.value, &joystick_x, sizeof(int32_t));
+                ESP_LOGI(GATTS_TAG, "Lecture X: %" PRIx32 "\n", joystick_x);
+            } else if (param->read.handle == gl_joystick_profile.char_y_handle) {
+                rsp.attr_value.len = sizeof(int32_t);
+                memcpy(rsp.attr_value.value, &joystick_y, sizeof(int32_t));
+                ESP_LOGI(GATTS_TAG, "Lecture %" PRIx32 "\n", joystick_y);
+            }
+            
+            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
             break;
         }
         default:
@@ -252,6 +387,11 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
             ESP_LOGI(GATTS_TAG, "Reg app failed app_id %04x, status %d", param->reg.app_id, param->reg.status);
             return;
         }
+    } else if (ESP_GATTS_DISCONNECT_EVT == event) {
+        ESP_LOGI(GATTS_TAG, "Disconnected, remote "ESP_BD_ADDR_STR", reason 0x%02x",
+        ESP_BD_ADDR_HEX(param->disconnect.remote_bda), param->disconnect.reason);
+        esp_ble_gap_start_advertising(&adv_params);
+        return;
     }
 
     do {
@@ -299,6 +439,51 @@ void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
             break;
         default:
             break;
+    }
+}
+
+// Fonction pour mettre à jour et notifier les valeurs du joystick
+void ble_update_joystick_value(char axis, int32_t value)
+{
+    if (axis == 'x') {
+        joystick_x = value;
+        
+        // Envoyer notification si connecté
+        if (gl_joystick_profile.gatts_if != ESP_GATT_IF_NONE && gl_joystick_profile.conn_id != 0) {
+            esp_ble_gatts_send_indicate(
+                gl_joystick_profile.gatts_if,
+                gl_joystick_profile.conn_id,
+                gl_joystick_profile.char_x_handle,
+                sizeof(int32_t),
+                (uint8_t*)&joystick_x,
+                false
+            );
+        }
+    } else if (axis == 'y') {
+        joystick_y = value;
+        
+        // Envoyer notification si connecté
+        if (gl_joystick_profile.gatts_if != ESP_GATT_IF_NONE && gl_joystick_profile.conn_id != 0) {
+            esp_ble_gatts_send_indicate(
+                gl_joystick_profile.gatts_if,
+                gl_joystick_profile.conn_id,
+                gl_joystick_profile.char_y_handle,
+                sizeof(int32_t),
+                (uint8_t*)&joystick_y,
+                false
+            );
+        }
+    }
+}
+
+// Handler d'événements pour traiter les événements du joystick
+void ble_joystick_event_handler(event_t *event)
+{
+    if (event->type == EVENT_BLE_JOYSTICK_DIRECTION) {
+        ble_update_joystick_value(
+            event->data.ble_joystick_direction.axe,
+            event->data.ble_joystick_direction.position
+        );
     }
 }
 
@@ -356,6 +541,15 @@ void ble_init()
         ESP_LOGE(GATTS_TAG, "cannot of register app motor. error code = %x", ret);
         return;
     }
+
+    ret = esp_ble_gatts_app_register(APP_JOYSTICK_ID);
+    if (ret) {
+        ESP_LOGE(GATTS_TAG, "cannot of register app joystick. error code = %x", ret);
+        return;
+    }
+
+    // // Enregistrer le handler d'événements pour les mises à jour du joystick
+    // event_bus_subscribe(EVENT_BLE_JOYSTICK_DIRECTION, ble_joystick_event_handler);
 
     ESP_LOGI(GATTS_TAG, "Serveur BLE is ready!");
 }
