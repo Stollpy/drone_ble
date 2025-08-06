@@ -50,9 +50,6 @@ static struct ble_joystick_profile_inst joystick_profile = {
 void ble_joystick_init(void)
 {
     ESP_LOGI(BLE_JOYSTICK_TAG, "Initializing Joystick BLE profile");
-    
-    // S'abonner aux événements de direction du joystick
-    event_bus_subscribe(EVENT_BLE_JOYSTICK_DIRECTION, ble_joystick_on_direction_event);
 }
 
 esp_err_t ble_joystick_register_app(void)
@@ -104,14 +101,19 @@ void ble_joystick_update_value(char axis, int32_t value)
     }
 }
 
-void ble_joystick_on_direction_event(event_t *event)
+static void ble_joystick_publish_event_direction(char axe, int position) 
 {
-    if (event->type == EVENT_BLE_JOYSTICK_DIRECTION) {
-        ble_joystick_update_value(
-            event->data.ble_joystick_direction.axe,
-            event->data.ble_joystick_direction.position
-        );
-    }
+    event_t event = {
+        .type = EVENT_BLE_JOYSTICK_DIRECTION,
+        .data = {
+            .ble_joystick_direction = {
+                .axe = axe,
+                .position = position
+            }
+        }
+    };
+
+    event_bus_publish(&event);
 }
 
 void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
@@ -211,9 +213,47 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
             esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
             break;
         }
+        case ESP_GATTS_WRITE_EVT: {
+            ESP_LOGI(BLE_JOYSTICK_TAG, "GATT_WRITE_EVT, conn_id %" PRIu16 ", trans_id %" PRIu32 ", handle %" PRIu16, param->write.conn_id, param->write.trans_id, param->write.handle);
+
+            if (!param->write.is_prep) {
+                ESP_LOGI(BLE_JOYSTICK_TAG, "Joystick write value len %d", param->write.len);
+
+                // Vérifier que la longueur correspond à un int32_t
+                if (param->write.len == sizeof(int32_t)) {
+                    int32_t new_value;
+                    memcpy(&new_value, param->write.value, sizeof(int32_t));
+
+                    if (param->write.handle == joystick_profile.char_x_handle) {
+                        // Mise à jour de la valeur X
+                        joystick_x = new_value;
+                        ESP_LOGI(BLE_JOYSTICK_TAG, "Joystick X écrit: %" PRId32, joystick_x);
+                        
+                        ble_joystick_publish_event_direction('x', joystick_x);
+                    } else if (param->write.handle == joystick_profile.char_y_handle) {
+                        // Mise à jour de la valeur Y
+                        joystick_y = new_value;
+                        ESP_LOGI(BLE_JOYSTICK_TAG, "Joystick Y écrit: %" PRId32, joystick_y);
+                        
+                        ble_joystick_publish_event_direction('y', joystick_y);
+                    } else {
+                        ESP_LOGW(BLE_JOYSTICK_TAG, "Write event not targeting a known joystick handle");
+                        esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_INVALID_HANDLE, NULL);
+                        return;
+                    }
+
+                    // Répondre avec succès
+                    esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
+                    
+                } else {
+                    ESP_LOGW(BLE_JOYSTICK_TAG, "Invalid write length: %d, expected %d bytes", param->write.len, sizeof(int32_t));
+                    esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_INVALID_PDU, NULL);
+                }
+            }
+            break;
+        }
         case ESP_GATTS_DISCONNECT_EVT:
             ESP_LOGI(BLE_JOYSTICK_TAG, "Joystick profile disconnected");
-            // La déconnexion est maintenant gérée centralement dans ble.c
             break;
             
         default:
