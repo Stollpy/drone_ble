@@ -2,6 +2,28 @@
 
 static const char* BLE_JOYSTICK_TAG = "BLE_JOYSTICK";
 
+// Joystick 128-bit UUIDs based on custom base
+uint8_t joystick_service_uuid[16] = {
+    0x01, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x02, 0x00,
+    0x6d, 0x9f, 0xf0, 0xe0
+};
+
+uint8_t joystick_char_x_uuid[16] = {
+    0x01, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x02, 0x00,
+    0x6d, 0x9f, 0xf0, 0xe0
+};
+
+uint8_t joystick_char_y_uuid[16] = {
+    0x02, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x02, 0x00,
+    0x6d, 0x9f, 0xf0, 0xe0
+};
+
 // Joystick state and characteristics
 static int32_t joystick_x = 0;
 static int32_t joystick_y = 0;
@@ -44,9 +66,9 @@ esp_err_t ble_joystick_register_app(void)
     return ESP_OK;
 }
 
-uint16_t ble_joystick_get_service_uuid(void)
+uint8_t* ble_joystick_get_service_uuid(void)
 {
-    return BLE_JOYSTICK_SERVICE_UUID;
+    return joystick_service_uuid;
 }
 
 void ble_joystick_update_value(char axis, int32_t value)
@@ -101,8 +123,8 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
             
             joystick_profile.gatts_if = gatts_if;
             joystick_profile.service_id.is_primary = true;
-            joystick_profile.service_id.id.uuid.len = ESP_UUID_LEN_16;
-            joystick_profile.service_id.id.uuid.uuid.uuid16 = BLE_JOYSTICK_SERVICE_UUID;
+            joystick_profile.service_id.id.uuid.len = ESP_UUID_LEN_128;
+            memcpy(joystick_profile.service_id.id.uuid.uuid.uuid128, joystick_service_uuid, ESP_UUID_LEN_128);
             
             esp_ble_gatts_create_service(gatts_if, &joystick_profile.service_id, BLE_JOYSTICK_HANDLE);
             break;
@@ -113,8 +135,8 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
             joystick_profile.service_handle = param->create.service_handle;
             
             // Configuration de la caractéristique X
-            joystick_profile.char_x_uuid.len = ESP_UUID_LEN_16;
-            joystick_profile.char_x_uuid.uuid.uuid16 = BLE_JOYSTICK_X_CHARACTERISTIC_UUID;
+            joystick_profile.char_x_uuid.len = ESP_UUID_LEN_128;
+            memcpy(joystick_profile.char_x_uuid.uuid.uuid128, joystick_char_x_uuid, ESP_UUID_LEN_128);
 
             esp_ble_gatts_start_service(joystick_profile.service_handle);
             
@@ -137,13 +159,13 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
                 param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
             
             // Identifier quelle caractéristique a été ajoutée
-            if (param->add_char.char_uuid.uuid.uuid16 == BLE_JOYSTICK_X_CHARACTERISTIC_UUID) {
+            if (memcmp(param->add_char.char_uuid.uuid.uuid128, joystick_char_x_uuid, ESP_UUID_LEN_128) == 0) {
                 joystick_profile.char_x_handle = param->add_char.attr_handle;
                 ESP_LOGI(BLE_JOYSTICK_TAG, "Caractéristique X ajoutée, handle: %d", joystick_profile.char_x_handle);
                 
                 // Ajouter maintenant la caractéristique Y
-                joystick_profile.char_y_uuid.len = ESP_UUID_LEN_16;
-                joystick_profile.char_y_uuid.uuid.uuid16 = BLE_JOYSTICK_Y_CHARACTERISTIC_UUID;
+                joystick_profile.char_y_uuid.len = ESP_UUID_LEN_128;
+                memcpy(joystick_profile.char_y_uuid.uuid.uuid128, joystick_char_y_uuid, ESP_UUID_LEN_128);
                 
                 esp_err_t add_char_y_ret = esp_ble_gatts_add_char(
                     joystick_profile.service_handle,
@@ -156,7 +178,7 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
                 if (add_char_y_ret) {
                     ESP_LOGE(BLE_JOYSTICK_TAG, "add char Y failed, error code = %x", add_char_y_ret);
                 }
-            } else if (param->add_char.char_uuid.uuid.uuid16 == BLE_JOYSTICK_Y_CHARACTERISTIC_UUID) {
+            } else if (memcmp(param->add_char.char_uuid.uuid.uuid128, joystick_char_y_uuid, ESP_UUID_LEN_128) == 0) {
                 joystick_profile.char_y_handle = param->add_char.attr_handle;
                 ESP_LOGI(BLE_JOYSTICK_TAG, "Caractéristique Y ajoutée, handle: %d", joystick_profile.char_y_handle);
             }

@@ -22,10 +22,11 @@
 // Motor BLE Profile constants
 #define BLE_MOTOR_APP_ID 0
 #define BLE_MOTOR_CHAR_VAL_LEN_MAX 0x01
-#define BLE_MOTOR_SERVICE_UUID 0x00FF
-#define BLE_MOTOR_CHARACTERISTIC_UUID 0xFF01
-#define BLE_MOTOR_DESCR_UUID 0x3333
 #define BLE_MOTOR_HANDLE 0x04
+
+// Motor 128-bit UUIDs
+extern uint8_t motor_service_uuid[16];
+extern uint8_t motor_char_uuid[16];
 
 // Motor states
 #define BLE_MOTOR_STATE_START 0x01
@@ -51,6 +52,6 @@ struct ble_motor_profile_inst {
 void ble_motor_init(void);
 void ble_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 esp_err_t ble_motor_register_app(void);
-uint16_t ble_motor_get_service_uuid(void);
+uint8_t* ble_motor_get_service_uuid(void);
 
 #endif // BLE_MOTOR_H

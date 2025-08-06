@@ -22,10 +22,12 @@
 // Joystick BLE Profile constants
 #define BLE_JOYSTICK_APP_ID 1
 #define BLE_JOYSTICK_CHAR_VAL_LEN_MAX 0x08  // 4 bytes pour X + 4 bytes pour Y
-#define BLE_JOYSTICK_SERVICE_UUID 0x00FE
-#define BLE_JOYSTICK_X_CHARACTERISTIC_UUID 0xFE01
-#define BLE_JOYSTICK_Y_CHARACTERISTIC_UUID 0xFE02
 #define BLE_JOYSTICK_HANDLE 0x08
+
+// Joystick 128-bit UUIDs
+extern uint8_t joystick_service_uuid[16];
+extern uint8_t joystick_char_x_uuid[16];
+extern uint8_t joystick_char_y_uuid[16];
 
 // Joystick profile structure
 struct ble_joystick_profile_inst {
@@ -51,6 +53,6 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 void ble_joystick_update_value(char axis, int32_t value);
 void ble_joystick_on_direction_event(event_t *event);
 esp_err_t ble_joystick_register_app(void);
-uint16_t ble_joystick_get_service_uuid(void);
+uint8_t* ble_joystick_get_service_uuid(void);
 
 #endif // BLE_JOYSTICK_H

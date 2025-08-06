@@ -2,6 +2,21 @@
 
 static const char* BLE_MOTOR_TAG = "BLE_MOTOR";
 
+// Motor 128-bit UUIDs based on custom base
+uint8_t motor_service_uuid[16] = {
+    0x01, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00,
+    0x6d, 0x9f, 0xf0, 0xe0
+};
+
+uint8_t motor_char_uuid[16] = {
+    0x01, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00,
+    0x6d, 0x9f, 0xf0, 0xe0
+};
+
 // Motor state and characteristics
 static uint8_t motor_state = BLE_MOTOR_STATE_STOP;
 static esp_attr_value_t motor_char_val = {
@@ -33,9 +48,9 @@ esp_err_t ble_motor_register_app(void)
     return ESP_OK;
 }
 
-uint16_t ble_motor_get_service_uuid(void)
+uint8_t* ble_motor_get_service_uuid(void)
 {
-    return BLE_MOTOR_SERVICE_UUID;
+    return motor_service_uuid;
 }
 
 void ble_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
@@ -47,8 +62,8 @@ void ble_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
             
             motor_profile.gatts_if = gatts_if;
             motor_profile.service_id.is_primary = true;
-            motor_profile.service_id.id.uuid.len = ESP_UUID_LEN_16;
-            motor_profile.service_id.id.uuid.uuid.uuid16 = BLE_MOTOR_SERVICE_UUID;
+            motor_profile.service_id.id.uuid.len = ESP_UUID_LEN_128;
+            memcpy(motor_profile.service_id.id.uuid.uuid.uuid128, motor_service_uuid, ESP_UUID_LEN_128);
             
             esp_ble_gatts_create_service(gatts_if, &motor_profile.service_id, BLE_MOTOR_HANDLE);
             break;
@@ -57,8 +72,8 @@ void ble_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
             ESP_LOGI(BLE_MOTOR_TAG, "CREATE SERVICE EVT: status %d, service handle: %d", param->create.status, param->create.service_handle);
             
             motor_profile.service_handle = param->create.service_handle;
-            motor_profile.char_uuid.len = ESP_UUID_LEN_16;
-            motor_profile.char_uuid.uuid.uuid16 = BLE_MOTOR_CHARACTERISTIC_UUID;
+            motor_profile.char_uuid.len = ESP_UUID_LEN_128;
+            memcpy(motor_profile.char_uuid.uuid.uuid128, motor_char_uuid, ESP_UUID_LEN_128);
 
             esp_ble_gatts_start_service(motor_profile.service_handle);
            
@@ -86,7 +101,7 @@ void ble_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
                 
             motor_profile.char_handle = param->add_char.attr_handle;
             motor_profile.service_handle = param->add_char.service_handle;
-            motor_profile.char_uuid.uuid.uuid16 = param->add_char.char_uuid.uuid.uuid16;
+            // motor_profile.char_uuid.uuid.uuid16 = param->add_char.char_uuid.uuid.uuid16;
             
             esp_err_t get_attr_ret = esp_ble_gatts_get_attr_value(param->add_char.attr_handle, &length, &prf_char);
             if (get_attr_ret == ESP_FAIL) {

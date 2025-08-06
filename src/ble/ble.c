@@ -2,18 +2,11 @@
 
 static uint8_t adv_config_done = 0;
 
-// UUID 16-bit pour service principal (Motor en priorité)
-// Alternative : utiliser un seul service en advertising pour éviter l'erreur 102
-static uint8_t adv_service_uuid16[2] = {
-    // Service Motor (0x00FF) - little endian
-    0xFF, 0x00
-};
-
 static uint8_t adv_uuid128[16] = {
-    0xe7, 0xa1, 0x32, 0x91,
-    0xe8, 0x55, 0x29, 0x83,
-    0x2a, 0x4f, 0x34, 0x12,
-    0xe6, 0x38, 0x7c, 0xf9
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x6d, 0x9f, 0xf0, 0xe0
 };
 
 // Configuration minimale des données d'advertising
@@ -32,20 +25,6 @@ static esp_ble_adv_data_t adv_data = {
     .p_service_uuid = adv_uuid128,
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT)
 };
-
-// // Données de scan response pour le service Joystick
-// static uint8_t scan_rsp_service_uuid16[2] = {
-//     0xFE, 0x00  // Service Joystick (0x00FE)
-// };
-
-// static esp_ble_adv_data_t scan_rsp_data = {
-//     .set_scan_rsp = true,
-//     .include_name = false,
-//     .include_txpower = false,
-//     .service_uuid_len = sizeof(scan_rsp_service_uuid16),
-//     .p_service_uuid = scan_rsp_service_uuid16,
-//     .flag = 0
-// };
 
 // Paramètres d'advertising
 static esp_ble_adv_params_t adv_params = {
@@ -270,81 +249,13 @@ void ble_server_init(void)
     if (ret) {
         ESP_LOGE(BLE_SERVER_TAG, "Config adv data failed, error code = 0x%x (%d)", ret, ret);
         return;
-        // // Fallback: configuration minimale sans UUIDs
-        // ESP_LOGW(BLE_SERVER_TAG, "Trying fallback configuration (name only)...");
-        // esp_ble_adv_data_t fallback_adv_data = {
-        //     .set_scan_rsp = false,
-        //     .include_name = true,
-        //     .include_txpower = false,
-        //     .appearance = 0x00,
-        //     .manufacturer_len = 0,
-        //     .p_manufacturer_data = NULL,
-        //     .service_data_len = 0,
-        //     .p_service_data = NULL,
-        //     .service_uuid_len = 0,  // Pas d'UUIDs
-        //     .p_service_uuid = NULL,
-        //     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT)
-        // };
-        
-        // ret = esp_ble_gap_config_adv_data(&fallback_adv_data);
-        // if (ret) {
-        //     ESP_LOGE(BLE_SERVER_TAG, "Fallback config also failed, error code = 0x%x", ret);
-        //     return;
-        // } else {
-        //     ESP_LOGW(BLE_SERVER_TAG, "Fallback advertising configured (no service UUIDs)");
-        // }
     } else {
         ESP_LOGI(BLE_SERVER_TAG, "Advertising data configured successfully");
     }
     adv_config_done |= BLE_ADV_CONFIG_FLAG;
 
-    // // Configuration des données de scan response (pour le service Joystick) - optionnel
-    // ESP_LOGI(BLE_SERVER_TAG, "Configuring scan response data...");
-    // ret = esp_ble_gap_config_adv_data(&scan_rsp_data);
-    // if (ret) {
-    //     ESP_LOGW(BLE_SERVER_TAG, "Config scan response data failed, error code = 0x%x", ret);
-    //     ESP_LOGW(BLE_SERVER_TAG, "Continuing without scan response data...");
-    //     // Ne pas retourner, continuer sans scan response
-    // } else {
-    //     ESP_LOGI(BLE_SERVER_TAG, "Scan response data configured successfully");
-    //     adv_config_done |= BLE_SCAN_RSP_CONFIG_FLAG;
-    // }
-
-    // MOTOR UUID TODO
-    // static uint8_t service1_uuid[16] = {
-    //     0xe0, 0xf0, 0x9f, 0x6d,
-    //     0xda, 0x1b, 0xa1, 0x84,
-    //     0x0b, 0x4a, 0x96, 0x84,
-    //     0xfc, 0xd3, 0xe8, 0x31
-    // };
-    // static uint8_t service1_uuid[16] = {
-    //     0xe0, 0xf0, 0x9f, 0x6d,
-    //     0xda, 0x1b, 0xa1, 0x84,
-    //     0x0b, 0x4a, 0x96, 0x84,
-    //     0xfc, 0xd3, 0xe8, 0x31
-    // };
-
-    // JOYSTICK UUID TODO
-    //static uint8_t service2_uuid[16] = {
-    //     0x7b, 0x7d, 0xaa, 0x59,
-    //     0xf1, 0xe5, 0xb6, 0x83,
-    //     0x54, 0x40, 0x95, 0x67,
-    //     0xd7, 0x68, 0x15, 0x7c
-    // };
-    // static uint8_t char2_x_uuid[16] = {
-    //     0x11, 0xc0, 0x36, 0x2c,
-    //     0xc7, 0x41, 0xdb, 0xb5,
-    //     0x09, 0x43, 0x5d, 0x78,
-    //     0xfc, 0x3b, 0x1b, 0xb4
-    // };
-    // static uint8_t char2_y_uuid[16] = {
-    //     0xa9, 0xc0, 0x2d, 0x6e,
-    //     0x28, 0x96, 0xb1, 0x9d,
-    //     0x74, 0x4b, 0x6e, 0x51,
-    //     0x6e, 0xab, 0xe1, 0xdb
-    // };
-    
-
     ESP_LOGI(BLE_SERVER_TAG, "BLE Server initialization complete!");
-    ESP_LOGI(BLE_SERVER_TAG, "Available services: Motor (0x%04X), Joystick (0x%04X)", ble_motor_get_service_uuid(), ble_joystick_get_service_uuid());
+    ESP_LOGI(BLE_SERVER_TAG, "Available services with 128-bit UUIDs:");
+    ESP_LOGI(BLE_SERVER_TAG, "- Motor service");
+    ESP_LOGI(BLE_SERVER_TAG, "- Joystick service");
 }
