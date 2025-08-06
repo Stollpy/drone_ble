@@ -147,7 +147,7 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
                 joystick_profile.service_handle,
                 &joystick_profile.char_x_uuid,
                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
                 &joystick_x_char_val,
                 NULL);
 
@@ -173,7 +173,7 @@ void ble_joystick_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
                     joystick_profile.service_handle,
                     &joystick_profile.char_y_uuid,
                     ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                    ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                    ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE,
                     &joystick_y_char_val,
                     NULL);
 
