@@ -1,35 +1,15 @@
-#include "ble/ble.h"
+#include "ble.h"
 
 static uint8_t adv_config_done = 0;
 
-static uint8_t motor_state = MOTOR_STATE_STOP;
-static esp_attr_value_t motor_char_val = {
-    .attr_max_len = APP_MOTOR_CHAR_VAL_LEN_MAX,
-    .attr_len = sizeof(motor_state),
-    .attr_value = &motor_state
+static uint8_t adv_uuid128[16] = {
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+    0x6d, 0x9f, 0xf0, 0xe0
 };
 
-// Prefix 128 bits: 0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00
-static uint8_t adv_service_uuid128[16] = {
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00
-};
-
-struct gatts_profile_inst
-{
-    esp_gatts_cb_t gatts_cb;
-    uint16_t gatts_if;
-    uint16_t app_id;
-    uint16_t conn_id;
-    uint16_t service_handle;
-    esp_gatt_srvc_id_t service_id;
-    uint16_t char_handle;
-    esp_bt_uuid_t char_uuid;
-    esp_gatt_perm_t perm;
-    esp_gatt_char_prop_t property;
-    uint16_t descr_handle;
-    esp_bt_uuid_t descr_uuid;
-};
-
+// Configuration minimale des données d'advertising
 static esp_ble_adv_data_t adv_data = {
     .set_scan_rsp = false,
     .include_name = true,
@@ -41,11 +21,12 @@ static esp_ble_adv_data_t adv_data = {
     .p_manufacturer_data = NULL,
     .service_data_len = 0,
     .p_service_data = NULL,
-    .service_uuid_len = sizeof(adv_service_uuid128),
-    .p_service_uuid = adv_service_uuid128,
+    .service_uuid_len = sizeof(adv_uuid128),
+    .p_service_uuid = adv_uuid128,
     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT)
 };
 
+// Paramètres d'advertising
 static esp_ble_adv_params_t adv_params = {
     .adv_int_min = 0x20,
     .adv_int_max = 0x40,
@@ -55,208 +36,74 @@ static esp_ble_adv_params_t adv_params = {
     .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY
 };
 
-// static esp_ble_adv_data_t scan_rsp_data = {
-//     .set_scan_rsp = true,
-//     .include_name = true,
-//     .include_txpower = true,
-//     // .min_interval = 0x0006,
-//     // .max_interval = 0x0010,
-//     .appearance = 0x00,
-//     .manufacturer_len = 0,
-//     .p_manufacturer_data = NULL,
-//     .service_data_len = 0,
-//     .p_service_data = NULL,
-//     .service_uuid_len = sizeof(adv_service_uuid128),
-//     .p_service_uuid = adv_service_uuid128,
-//     .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT)
-// };
-
-static struct gatts_profile_inst gl_profile_tab[APP_NUM] = {
-    [APP_MOTOR_ID] = {
-        .gatts_cb = gatts_app_motor_event_handler,
+// Tableau des profils GATT
+static struct gatts_profile_inst {
+    esp_gatts_cb_t gatts_cb;
+    uint16_t gatts_if;
+    uint16_t app_id;
+} gl_profile_tab[BLE_APP_NUM] = {
+    [BLE_MOTOR_APP_ID] = {
+        .gatts_cb = ble_motor_event_handler,
+        .gatts_if = ESP_GATT_IF_NONE,
+    },
+    [BLE_JOYSTICK_APP_ID] = {
+        .gatts_cb = ble_joystick_event_handler,
         .gatts_if = ESP_GATT_IF_NONE,
     }
 };
 
-
-void gatts_app_motor_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+void ble_server_gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
-    switch (event)
-    {
+    // Gestion centralisée des événements globaux
+    switch (event) {
         case ESP_GATTS_REG_EVT:
-            ESP_LOGI(GATTS_TAG, "REGISTER_APP_EVT: status %d, app_id %d", param->reg.status, param->reg.app_id);
-            
-            gl_profile_tab[APP_MOTOR_ID].service_id.is_primary = true;
-            gl_profile_tab[APP_MOTOR_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
-            gl_profile_tab[APP_MOTOR_ID].service_id.id.uuid.uuid.uuid16 = MOTOR_SERVICE_UUID;
-            
-            esp_ble_gap_set_device_name(DEVICE_NAME);
-
-            esp_err_t ret = esp_ble_gap_config_adv_data(&adv_data);
-            if (ret) {
-                ESP_LOGE(GATTS_TAG, "config adv data failed, error code = %x", ret);
-            }
-            
-            adv_config_done |= adv_config_flag;
-            esp_ble_gatts_create_service(gatts_if, &gl_profile_tab[APP_MOTOR_ID].service_id, MOTOR_HANDLE);
-            break;
-        case ESP_GATTS_CREATE_EVT:
-            ESP_LOGI(GATTS_TAG, "CREATE SERVICE EVT: status %d, service handle: %d", param->create.status, param->create.service_handle);
-            
-            gl_profile_tab[APP_MOTOR_ID].service_handle = param->create.service_handle;
-            gl_profile_tab[APP_MOTOR_ID].char_uuid.len = ESP_UUID_LEN_16;
-            gl_profile_tab[APP_MOTOR_ID].char_uuid.uuid.uuid16 = MOTOR_CHARACTERISTIC_UUID;
-
-            esp_ble_gatts_start_service(gl_profile_tab[APP_MOTOR_ID].service_handle);
-           
-            ESP_LOGI(GATTS_TAG, "CREATE SERVICE EVT: service started");
-            
-            esp_err_t add_char_ret = esp_ble_gatts_add_char(
-                gl_profile_tab[APP_MOTOR_ID].service_handle,
-                &gl_profile_tab[APP_MOTOR_ID].char_uuid,
-                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE, // | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
-                &motor_char_val,
-                NULL);
-
-            if (add_char_ret) {
-                ESP_LOGE(GATTS_TAG, "add char failed, error code = %x", add_char_ret);
+            if (ESP_GATT_OK == param->reg.status) {
+                gl_profile_tab[param->reg.app_id].gatts_if = gatts_if;
+            } else {
+                ESP_LOGI(BLE_SERVER_TAG, "Reg app failed app_id %04x, status %d", param->reg.app_id, param->reg.status);
+                return;
             }
             break;
-        case ESP_GATTS_ADD_CHAR_EVT: {
-            uint16_t length = 0;
-            const uint8_t *prf_char;
-
-            ESP_LOGI(GATTS_TAG, "ADD_CHAR_EVT, status %d, attr_handle %d, servive_handle %d", param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
-            gl_profile_tab[APP_MOTOR_ID].char_handle = param->add_char.attr_handle;
-            gl_profile_tab[APP_MOTOR_ID].service_handle = param->add_char.service_handle;
-            gl_profile_tab[APP_MOTOR_ID].char_uuid.uuid.uuid16 = param->add_char.char_uuid.uuid.uuid16;
             
-            esp_err_t get_attr_ret = esp_ble_gatts_get_attr_value(param->add_char.attr_handle, &length, &prf_char);
-            if (get_attr_ret == ESP_FAIL) {
-                ESP_LOGE(GATTS_TAG, "ILLEGAL HANDLE");
-            }
-
-            ESP_LOGI(GATTS_TAG, "The gatts demo char length = %x", length);
-
-            esp_err_t add_descr_ret = esp_ble_gatts_add_char_descr(
-                gl_profile_tab[APP_MOTOR_ID].service_handle,
-                &gl_profile_tab[APP_MOTOR_ID].descr_uuid,
-                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-                NULL, NULL
-            );
-
-            if (add_descr_ret) {
-                ESP_LOGE(GATTS_TAG, "Add char descr failed, error code = %x", add_descr_ret);
-            }
-            break;
-        }
-        case ESP_GATTS_ADD_CHAR_DESCR_EVT:
-            gl_profile_tab[APP_MOTOR_ID].descr_handle = param->add_char_descr.attr_handle;
-            ESP_LOGI(GATTS_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d", param->add_char.status, param->add_char.attr_handle, param->add_char.service_handle);
-            break;
-        case ESP_GATTS_CONNECT_EVT: {
+        case ESP_GATTS_CONNECT_EVT:
+            ESP_LOGI(BLE_SERVER_TAG, "Client connected, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x",
+                param->connect.conn_id,
+                param->connect.remote_bda[0], param->connect.remote_bda[1],
+                param->connect.remote_bda[2], param->connect.remote_bda[3],
+                param->connect.remote_bda[4], param->connect.remote_bda[5]);
+                
+            // Configurer les paramètres de connexion
             esp_ble_conn_update_params_t conn_params = {0};
             memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
-            
             conn_params.latency = 0;
             conn_params.max_int = 0x30;
             conn_params.min_int = 0x10;
             conn_params.timeout = 400;
-
-            ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x",
-                param->connect.conn_id,
-                param->connect.remote_bda[0],
-                param->connect.remote_bda[1],
-                param->connect.remote_bda[2],
-                param->connect.remote_bda[3],
-                param->connect.remote_bda[4],
-                param->connect.remote_bda[5]
-            );
-
-            gl_profile_tab[APP_MOTOR_ID].conn_id = param->connect.conn_id;
-
             esp_ble_gap_update_conn_params(&conn_params);
             break;
-        }
-        case ESP_GATTS_READ_EVT: {
-            ESP_LOGI(GATTS_TAG, "GATT_READ_EVT, conn_id %" PRIu16 ", trans_id %" PRIu32 ", handle %" PRIu16, param->read.conn_id, param->read.trans_id, param->read.handle);
-
-            esp_gatt_rsp_t rsp;
-            memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
             
-            rsp.attr_value.handle = param->read.handle;
-            rsp.attr_value.len = APP_MOTOR_CHAR_VAL_LEN_MAX;
-            rsp.attr_value.value[0] = motor_state;
+        case ESP_GATTS_DISCONNECT_EVT:
+            ESP_LOGI(BLE_SERVER_TAG, "Client disconnected, remote %02x:%02x:%02x:%02x:%02x:%02x, reason 0x%02x",
+                param->disconnect.remote_bda[0], param->disconnect.remote_bda[1],
+                param->disconnect.remote_bda[2], param->disconnect.remote_bda[3],
+                param->disconnect.remote_bda[4], param->disconnect.remote_bda[5],
+                param->disconnect.reason);
             
-            esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
-            break;
-        }
-        case ESP_GATTS_WRITE_EVT: {
-            ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, conn_id %" PRIu16 ", trans_id %" PRIu32 ", handle %" PRIu16, param->write.conn_id, param->write.trans_id, param->write.handle);
-
-            if (!param->write.is_prep) {
-                ESP_LOGI(GATTS_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
-
-                if (param->write.handle == gl_profile_tab[APP_MOTOR_ID].char_handle && param->write.len == 1) {
-                    motor_state = param->write.value[0];
-
-                    if (motor_state == 0) {
-                        ESP_LOGI(GATTS_TAG, "Received value: 0 - Motor stopped");
-                    } else if (motor_state == 1) {
-                        ESP_LOGI(GATTS_TAG, "Received value: 1 - Motor started");
-                    } else {
-                        ESP_LOGW(GATTS_TAG, "Invalid value received: %d", motor_state);
-                    }
-
-                    // TODO: Implement motor control by Bus
-                    // gpio_set_level(MOTOR_1_PIN_1, motor_state);
-
-                    event_t event = {
-                        .type = EVENT_BLE_MOTORS_COMMAND,
-                        .data = {
-                            .ble_motors_command = {
-                                .type = motor_state
-                            }
-                        }
-                    };
-
-                    event_bus_publish(&event);
-                    esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
-                } else {
-                    ESP_LOGW(GATTS_TAG, "Write event not targeting the correct handle or invalid length");
-                    esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_INVALID_HANDLE, NULL);
-
-                }
-            }
-            break;
-        }
-        case ESP_GATTS_DISCONNECT_EVT: {
-            ESP_LOGI(GATTS_TAG, "Disconnected, remote "ESP_BD_ADDR_STR", reason 0x%02x",
-            ESP_BD_ADDR_HEX(param->disconnect.remote_bda), param->disconnect.reason);
-            esp_ble_gap_start_advertising(&adv_params);
-            break;
-        }
-        default:
-            break;
-    }
-}
-
-
-void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
-{
-    if (ESP_GATTS_REG_EVT == event) {
-        if (ESP_GATT_OK == param->reg.status) {
-            gl_profile_tab[param->reg.app_id].gatts_if = gatts_if;
-        } else {
-            ESP_LOGI(GATTS_TAG, "Reg app failed app_id %04x, status %d", param->reg.app_id, param->reg.status);
+            // Redémarrer l'advertising centralisé ici
+            ble_server_on_disconnect();
+            
+            // Ne pas dispatcher cet événement aux profils pour éviter la duplication
             return;
-        }
+            
+        default:
+            // Autres événements continuent vers les profils
+            break;
     }
 
+    // Dispatch des événements vers les handlers spécifiques des profils
     do {
         int idx;
-        for(idx = 0; idx < APP_NUM; idx++) {
+        for(idx = 0; idx < BLE_APP_NUM; idx++) {
             if (ESP_GATT_IF_NONE == gatts_if || gatts_if == gl_profile_tab[idx].gatts_if) {
                 if (gl_profile_tab[idx].gatts_cb) {
                     gl_profile_tab[idx].gatts_cb(event, gatts_if, param);
@@ -264,48 +111,65 @@ void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp
             }
         }
     } while (0);
-    
 }
 
-void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
+void ble_server_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     switch (event)
     {
         case ESP_GAP_BLE_ADV_DATA_SET_COMPLETE_EVT:
-            adv_config_done &= (~adv_config_flag);
+            adv_config_done &= (~BLE_ADV_CONFIG_FLAG);
             if (0 == adv_config_done) {
                 esp_ble_gap_start_advertising(&adv_params);
             }
             break;
+            
         case ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT:
-            adv_config_done &= (~scan_rsp_config_flag);
+            adv_config_done &= (~BLE_SCAN_RSP_CONFIG_FLAG);
             if (0 == adv_config_done) {
                 esp_ble_gap_start_advertising(&adv_params);
             }
             break;
+            
         case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
             if (ESP_BT_STATUS_SUCCESS != param->adv_start_cmpl.status) {
-                ESP_LOGE(GATTS_TAG, "Advertising start failed");
+                ESP_LOGE(BLE_SERVER_TAG, "Advertising start failed");
             } else {
-                ESP_LOGE(GATTS_TAG, "Advertising started with successfully");
+                ESP_LOGI(BLE_SERVER_TAG, "Advertising started successfully - Services: Motor(0x00FF), Joystick(0x00FE)");
             }
             break;
+            
         case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
-            ESP_LOGI(GATTS_TAG, "update connection params status = %d, conn_int = %d, latency = %d, timeout = %d", 
+            ESP_LOGI(BLE_SERVER_TAG, "Connection params update: status=%d, conn_int=%d, latency=%d, timeout=%d", 
                 param->update_conn_params.status, 
                 param->update_conn_params.conn_int, 
                 param->update_conn_params.latency, 
                 param->update_conn_params.timeout);
             break;
+            
         default:
             break;
     }
 }
 
-// MAC: d0:ef:76:1e:5d:ec
-// Bluetooth MAC: d0:ef:76:1e:5d:ee
-void ble_init() 
+// Handler global pour les déconnexions - redémarre l'advertising
+static void ble_server_handle_disconnect(void)
 {
+    ESP_LOGI(BLE_SERVER_TAG, "Device disconnected - restarting advertising");
+    esp_ble_gap_start_advertising(&adv_params);
+}
+
+// Wrapper pour gérer les déconnexions depuis les profils
+void ble_server_on_disconnect(void)
+{
+    ble_server_handle_disconnect();
+}
+
+void ble_server_init(void)
+{
+    ESP_LOGI(BLE_SERVER_TAG, "Initializing BLE Server with %d services", BLE_ADV_SERVICE_COUNT);
+    
+    // Initialisation NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -313,49 +177,85 @@ void ble_init()
     }
     ESP_ERROR_CHECK(ret);
 
+    // Initialisation du contrôleur Bluetooth
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s init bluetooth controller failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(BLE_SERVER_TAG, "Bluetooth controller init failed: %s", esp_err_to_name(ret));
         return;
     }
 
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s  enable controller bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(BLE_SERVER_TAG, "Bluetooth controller enable failed: %s", esp_err_to_name(ret));
         return;
     }
 
+    // Initialisation de la stack Bluedroid
     ret = esp_bluedroid_init();
     if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s init bluedroid failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(BLE_SERVER_TAG, "Bluedroid init failed: %s", esp_err_to_name(ret));
         return;
     }
 
     ret = esp_bluedroid_enable();
     if (ret) {
-        ESP_LOGE(GATTS_TAG, "%s enable bluedroid failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(BLE_SERVER_TAG, "Bluedroid enable failed: %s", esp_err_to_name(ret));
         return;
     }
 
-    ret = esp_ble_gatts_register_callback(gatts_event_handler);
+    // Enregistrement des callbacks
+    ret = esp_ble_gatts_register_callback(ble_server_gatts_event_handler);
     if (ret) {
-        ESP_LOGE(GATTS_TAG, "gatts register handler failed. error code = %x", ret);
+        ESP_LOGE(BLE_SERVER_TAG, "GATTS register callback failed, error code = %x", ret);
         return;
     }
 
-    ret = esp_ble_gap_register_callback(gap_event_handler);
+    ret = esp_ble_gap_register_callback(ble_server_gap_event_handler);
     if (ret) {
-        ESP_LOGE(GATTS_TAG, "gap register handler failed. error code = %x", ret);
+        ESP_LOGE(BLE_SERVER_TAG, "GAP register callback failed, error code = %x", ret);
         return;
     }
 
-    ret = esp_ble_gatts_app_register(APP_MOTOR_ID);
+    // Configuration du nom du périphérique
+    ret = esp_ble_gap_set_device_name(BLE_DEVICE_NAME);
     if (ret) {
-        ESP_LOGE(GATTS_TAG, "cannot of register app motor. error code = %x", ret);
+        ESP_LOGE(BLE_SERVER_TAG, "Set device name failed, error = 0x%x", ret);
         return;
     }
 
-    ESP_LOGI(GATTS_TAG, "Serveur BLE is ready!");
+    // Initialisation des profils
+    ble_motor_init();
+    ble_joystick_init();
+
+    // Enregistrement des applications GATT
+    ret = ble_motor_register_app();
+    if (ret != ESP_OK) {
+        ESP_LOGE(BLE_SERVER_TAG, "Motor app registration failed");
+        return;
+    }
+
+    ret = ble_joystick_register_app();
+    if (ret != ESP_OK) {
+        ESP_LOGE(BLE_SERVER_TAG, "Joystick app registration failed");
+        return;
+    }
+
+    // Configuration des données d'advertising avec fallback
+    ESP_LOGI(BLE_SERVER_TAG, "Configuring advertising data...");
+    
+    ret = esp_ble_gap_config_adv_data(&adv_data);
+    if (ret) {
+        ESP_LOGE(BLE_SERVER_TAG, "Config adv data failed, error code = 0x%x (%d)", ret, ret);
+        return;
+    } else {
+        ESP_LOGI(BLE_SERVER_TAG, "Advertising data configured successfully");
+    }
+    adv_config_done |= BLE_ADV_CONFIG_FLAG;
+
+    ESP_LOGI(BLE_SERVER_TAG, "BLE Server initialization complete!");
+    ESP_LOGI(BLE_SERVER_TAG, "Available services with 128-bit UUIDs:");
+    ESP_LOGI(BLE_SERVER_TAG, "- Motor service");
+    ESP_LOGI(BLE_SERVER_TAG, "- Joystick service");
 }

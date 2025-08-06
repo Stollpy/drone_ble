@@ -12,7 +12,7 @@ void app_main()
     printf("Motors initialized\n");
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    ble_init();
+    ble_server_init();
     printf("BLE initialized\n");
     vTaskDelay(pdMS_TO_TICKS(500));
 
